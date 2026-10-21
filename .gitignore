@@ -1,0 +1,15 @@
+# środowisko wirtualne
+venv/
+
+# cache Pythona i Jupytera
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# duże pliki z danymi 
+data/*.zst
+data/*.parquet
+data/*.csv
+
+# sample.pgn zostaje w repo (jest mały)
+!data/sample.pgn

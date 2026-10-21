@@ -1,0 +1,57 @@
+[Event "Demo game - castling"]
+[Site "local"]
+[Date "2026.01.15"]
+[Round "1"]
+[White "PlayerA"]
+[Black "PlayerB"]
+[Result "*"]
+[WhiteElo "2100"]
+[BlackElo "1950"]
+[TimeControl "600+0"]
+[Termination "Normal"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. O-O Nf6 5. Re1 O-O *
+
+[Event "Demo game - check"]
+[Site "local"]
+[Date "2026.01.15"]
+[Round "2"]
+[White "PlayerC"]
+[Black "PlayerD"]
+[Result "*"]
+[WhiteElo "1500"]
+[BlackElo "1450"]
+[TimeControl "600+0"]
+[Termination "Normal"]
+
+1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7+ *
+
+[Event "Demo game - en passant"]
+[Site "local"]
+[Date "2026.01.15"]
+[Round "3"]
+[White "PlayerE"]
+[Black "PlayerF"]
+[Result "*"]
+[WhiteElo "1400"]
+[BlackElo "1350"]
+[TimeControl "600+0"]
+[Termination "Normal"]
+
+1. e4 h6 2. e5 d5 3. exd6 Nf6 4. Nf3 Nc6 *
+
+[Event "Demo game - promotion"]
+[Site "local"]
+[Date "2026.01.15"]
+[Round "4"]
+[White "PlayerG"]
+[Black "PlayerH"]
+[Result "*"]
+[WhiteElo "1800"]
+[BlackElo "800"]
+[SetUp "1"]
+[FEN "4k3/P7/8/8/8/8/8/4K3 w - - 0 1"]
+[TimeControl "600+0"]
+[Termination "Normal"]
+
+1. a8=Q *
