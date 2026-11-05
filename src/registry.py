@@ -14,7 +14,7 @@ game had:
                          stopped after finding 2 critical positions, or
                          skipped positions whose bucket was already full).
                          `n_critical` is only "at least this many" -> the
-                         true number is unknown ("nie wiadomo").
+                         true number is unknown.
 
 A game is identified by its Lichess URL (the `Site` header), which is
 stable; if there is none, by "<file name>#<index in the file>".
@@ -120,14 +120,14 @@ def critical_distribution(reg: pd.DataFrame, max_exact: int = 5) -> pd.DataFrame
     rows = []
     comp = reg[reg["complete"]]
     for k in range(max_exact):
-        rows.append((f"{k} (pewne)", int((comp["n_critical"] == k).sum())))
-    rows.append((f"{max_exact}+ (pewne)", int((comp["n_critical"] >= max_exact).sum())))
+        rows.append((f"{k} (certain)", int((comp["n_critical"] == k).sum())))
+    rows.append((f"{max_exact}+ (certain)", int((comp["n_critical"] >= max_exact).sum())))
     inc = reg[~reg["complete"]]
-    rows.append(("nie wiadomo - analiza niepelna, znaleziono 0", int((inc["n_critical"] == 0).sum())))
-    rows.append(("nie wiadomo - analiza niepelna, znaleziono 1 lub wiecej", int((inc["n_critical"] >= 1).sum())))
-    out = pd.DataFrame(rows, columns=["liczba_pozycji_krytycznych", "partie"])
-    total = out["partie"].sum()
-    out["udzial"] = (out["partie"] / total).round(4) if total else 0.0
+    rows.append(("unknown - partial analysis, 0 found", int((inc["n_critical"] == 0).sum())))
+    rows.append(("unknown - partial analysis, 1 or more found", int((inc["n_critical"] >= 1).sum())))
+    out = pd.DataFrame(rows, columns=["critical_positions_per_game", "games"])
+    total = out["games"].sum()
+    out["share"] = (out["games"] / total).round(4) if total else 0.0
     return out
 
 
@@ -199,13 +199,13 @@ def backfill_registry(
     per_kind = {}
     for csv_path, kind in sources.items():
         if not os.path.exists(csv_path):
-            print("pomijam (brak pliku):", csv_path)
+            print("skipping (file not found):", csv_path)
             continue
         g = _per_game_from_csv(csv_path, kind)
         if not g.empty:
             per_kind[csv_path] = g
     if not per_kind:
-        print("nic do dopisania")
+        print("nothing to add")
         return 0
 
     all_ids = set()
@@ -243,32 +243,32 @@ def backfill_registry(
                 n_found, complete, "backfill", depth, gap_threshold, min_ply,
             )
     append_registry(registry_csv, list(new_rows.values()))
-    print(f"dopisano {len(new_rows)} partii do rejestru")
+    print(f"added {len(new_rows)} games to the registry")
     return len(new_rows)
 
 
 def export_registry_xlsx(registry_csv: str, xlsx_path: str) -> None:
     """Write the registry as an Excel workbook with separate sheets:
-    'partie' (one row per game), 'rozklad_krytycznych' (how many games have
-    0, 1, 2, ... critical positions, or 'unknown') and 'opis' (legend).
+    'games' (one row per game), 'critical_distribution' (how many games have
+    0, 1, 2, ... critical positions, or 'unknown') and 'legend'.
     Close the file in Excel before exporting, otherwise Windows blocks it."""
     reg = load_registry(registry_csv)
     dist = critical_distribution(reg)
     legend = pd.DataFrame({
-        "kolumna": ["game_key", "n_critical", "complete", "analysed_positions",
-                    "eligible_positions", "method"],
-        "znaczenie": [
-            "adres partii na Lichess (lub plik#indeks)",
-            "liczba znalezionych pozycji krytycznych w partii",
-            "True = przeanalizowano wszystkie pozycje partii, n_critical jest dokladne; "
-            "False = analiza czesciowa, n_critical to dolne ograniczenie (nie wiadomo ile naprawde)",
-            "ile pozycji partii przeanalizowano Stockfishem",
-            "ile pozycji w partii nadawalo sie do analizy (od min_ply, >=2 legalne ruchy)",
-            "ktora funkcja przeanalizowala partie (backfill = dopisane z wczesniejszych plikow)",
+        "column": ["game_key", "n_critical", "complete", "analysed_positions",
+                   "eligible_positions", "method"],
+        "meaning": [
+            "Lichess URL of the game (or file#index)",
+            "number of critical positions found in the game",
+            "True = all positions of the game were analysed, n_critical is exact; "
+            "False = partial analysis, n_critical is only a lower bound (true number unknown)",
+            "how many positions of the game were analysed with Stockfish",
+            "how many positions of the game were eligible for analysis (from min_ply, >=2 legal moves)",
+            "which function analysed the game (backfill = added from earlier result files)",
         ],
     })
     with pd.ExcelWriter(xlsx_path, engine="openpyxl") as w:
-        reg.to_excel(w, sheet_name="partie", index=False)
-        dist.to_excel(w, sheet_name="rozklad_krytycznych", index=False)
-        legend.to_excel(w, sheet_name="opis", index=False)
-    print("zapisano:", xlsx_path)
+        reg.to_excel(w, sheet_name="games", index=False)
+        dist.to_excel(w, sheet_name="critical_distribution", index=False)
+        legend.to_excel(w, sheet_name="legend", index=False)
+    print("saved:", xlsx_path)

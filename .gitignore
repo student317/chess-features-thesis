@@ -11,5 +11,8 @@ data/*.zst
 data/*.parquet
 data/*.csv
 
+# Stockfish
+/stockfish/
+
 # sample.pgn zostaje w repo (jest mały)
 !data/sample.pgn

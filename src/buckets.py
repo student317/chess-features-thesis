@@ -6,8 +6,10 @@ the piece stood that had to make the best move:
 
     piece type   pawn / knight / bishop / rook / queen / king
     file         a b c d e f g h        (left -> right as seen by White)
-    half         "nasza polowa"         own half  (ranks 1-4 for White, 5-8 for Black)
-                 "polowa przeciwnika"   opponent's half
+    half         "own half"             (ranks 1-4 for White, 5-8 for Black)
+                 "opponent half"        (the other four ranks)
+    in check?    "defence against check" (the side to move is in check)
+                 "no check"
 
 Input is the natural (NOT balanced) data - e.g. `critical_positions.csv`
 made by find_critical_positions: every analysed position, with columns
@@ -34,9 +36,9 @@ import seaborn as sns
 
 FILES = list("abcdefgh")
 PIECE_ORDER = ["pawn", "knight", "bishop", "rook", "queen", "king"]
-OWN, OPP = "nasza polowa", "polowa przeciwnika"
+OWN, OPP = "own half", "opponent half"
 HALF_ORDER = [OWN, OPP]
-CHECK, NOCHECK = "obrona przed szachem", "bez szacha"
+CHECK, NOCHECK = "defence against check", "no check"
 CHECK_ORDER = [CHECK, NOCHECK]
 
 
@@ -106,22 +108,22 @@ def plot_piece_overview(df: pd.DataFrame):
     t = summarize(df, ["best_piece"])
     fig, ax = plt.subplots(1, 3, figsize=(16, 4))
     x = np.arange(len(t))
-    ax[0].bar(x, t["n_positions"], color="#b8c4d6", label="wszystkie pozycje")
-    ax[0].bar(x, t["n_critical"], color="#3b6ea5", label="krytyczne")
+    ax[0].bar(x, t["n_positions"], color="#b8c4d6", label="all positions")
+    ax[0].bar(x, t["n_critical"], color="#3b6ea5", label="critical")
     for i, (a, b) in enumerate(zip(t["n_positions"], t["n_critical"])):
-        ax[0].text(i, a, f"{a}\n({b} kryt.)", ha="center", va="bottom", fontsize=8)
-    ax[0].set_title("Ile pozycji: najlepszy ruch wykonuje...")
+        ax[0].text(i, a, f"{a}\n({b} critical)", ha="center", va="bottom", fontsize=8)
+    ax[0].set_title("Number of positions, by the piece making the best move")
     ax[0].legend(fontsize=8)
     ax[1].bar(x, t["critical_share"], color="#c98b2b")
     for i, v in enumerate(t["critical_share"]):
         ax[1].text(i, v, f"{v:.1%}", ha="center", va="bottom", fontsize=8)
-    ax[1].set_title("Jaki odsetek pozycji jest krytyczny")
+    ax[1].set_title("Share of positions that are critical")
     err = np.vstack([t["found_rate"] - t["ci_low"], t["ci_high"] - t["found_rate"]])
     ax[2].bar(x, t["found_rate"], yerr=np.nan_to_num(err), capsize=4, color="#4c9a6a")
     for i, (v, n) in enumerate(zip(t["found_rate"], t["n_critical"])):
         ax[2].text(i, (0 if np.isnan(v) else v) + 0.02, f"{v:.0%}\nn={n}", ha="center", va="bottom", fontsize=8)
     ax[2].set_ylim(0, 1.15)
-    ax[2].set_title("Jak często znaleziono najlepszy ruch (95% CI)")
+    ax[2].set_title("How often the best move was found (95% CI)")
     for a in ax:
         a.set_xticks(x)
         a.set_xticklabels(t["best_piece"].astype(str))
@@ -149,7 +151,7 @@ def plot_half(df: pd.DataFrame):
     ax.set_xticks(np.arange(len(PIECE_ORDER)))
     ax.set_xticklabels(PIECE_ORDER)
     ax.set_ylim(0, 1.2)
-    ax.set_title("Odsetek znalezionych najlepszych ruchów: nasza połowa vs połowa przeciwnika")
+    ax.set_title("Share of best moves found: own half vs opponent half")
     ax.legend()
     fig.tight_layout()
     return fig
@@ -181,7 +183,7 @@ def plot_piece_file(df: pd.DataFrame, min_n: int = 10):
     n = t.pivot(index="best_piece", columns="best_file", values="n_critical").reindex(index=PIECE_ORDER, columns=FILES)
     fig, ax = plt.subplots(figsize=(11, 4))
     _annotated_heatmap(ax, rate, n, min_n,
-                       f"Odsetek znalezionych najlepszych ruchów: figura × kolumna (szare: n < {min_n})", show_cbar=True)
+                       f"Share of best moves found: piece × file (grey: n < {min_n})", show_cbar=True)
     fig.tight_layout()
     return fig
 
@@ -195,8 +197,23 @@ def plot_full_buckets(df: pd.DataFrame, min_n: int = 10):
         sub = t[t["best_piece"] == piece]
         rate = sub.pivot(index="half", columns="best_file", values="found_rate").reindex(index=HALF_ORDER, columns=FILES)
         n = sub.pivot(index="half", columns="best_file", values="n_critical").reindex(index=HALF_ORDER, columns=FILES)
-        _annotated_heatmap(ax, rate, n, min_n, f"{piece}  (szare: n < {min_n})")
-    fig.suptitle("Trafność decyzji w pozycjach krytycznych: figura × kolumna × połowa planszy", fontsize=12)
+        _annotated_heatmap(ax, rate, n, min_n, f"{piece}  (grey: n < {min_n})")
+    fig.suptitle("Decision accuracy in critical positions: piece × file × half of the board", fontsize=12)
+    fig.tight_layout()
+    return fig
+
+
+def plot_piece_file_by_half(df: pd.DataFrame, min_n: int = 10):
+    """Two big heatmaps side by side: OWN half | OPPONENT's half.
+    Rows = piece, columns = file a-h, text = found rate and n."""
+    t = summarize(df, ["best_piece", "half", "best_file"])
+    fig, axes = plt.subplots(1, 2, figsize=(15, 4.5), sharey=True)
+    for k, (ax, half) in enumerate(zip(axes, HALF_ORDER)):
+        sub = t[t["half"] == half]
+        rate = sub.pivot(index="best_piece", columns="best_file", values="found_rate").reindex(index=PIECE_ORDER, columns=FILES)
+        n = sub.pivot(index="best_piece", columns="best_file", values="n_critical").reindex(index=PIECE_ORDER, columns=FILES)
+        _annotated_heatmap(ax, rate, n, min_n, f"{half.upper()}  (grey: n < {min_n})", show_cbar=(k == 1))
+    fig.suptitle("Share of best moves found: piece × file, own half and opponent half shown separately", fontsize=12)
     fig.tight_layout()
     return fig
 
@@ -210,7 +227,7 @@ def plot_piece_elo(df: pd.DataFrame, bins: list[int], labels: list[str], min_n: 
     n = t.pivot(index="best_piece", columns="elo_bin", values="n_critical").reindex(index=PIECE_ORDER, columns=labels)
     fig, ax = plt.subplots(figsize=(8, 4))
     _annotated_heatmap(ax, rate, n, min_n,
-                       f"Odsetek znalezionych najlepszych ruchów: figura × Elo (szare: n < {min_n})", show_cbar=True)
+                       f"Share of best moves found: piece × Elo (grey: n < {min_n})", show_cbar=True)
     fig.tight_layout()
     return fig
 
@@ -236,9 +253,9 @@ def plot_check(df: pd.DataFrame):
     x = np.arange(2)
     ax[0].bar(x, t["n_positions"], color=[colors[c] for c in CHECK_ORDER])
     for i, (a, b) in enumerate(zip(t["n_positions"], t["n_critical"])):
-        ax[0].text(i, a, f"{a}\n({b} kryt., {b / a:.1%})", ha="center", va="bottom", fontsize=8)
+        ax[0].text(i, a, f"{a}\n({b} critical, {b / a:.1%})", ha="center", va="bottom", fontsize=8)
     ax[0].set_ylim(0, float(t["n_positions"].max()) * 1.2)
-    ax[0].set_title("Ile pozycji i ile krytycznych")
+    ax[0].set_title("Number of positions and critical positions")
 
     rate = t["found_rate"].to_numpy(dtype=float)
     err = np.vstack([rate - t["ci_low"].to_numpy(dtype=float), t["ci_high"].to_numpy(dtype=float) - rate])
@@ -246,7 +263,7 @@ def plot_check(df: pd.DataFrame):
     for i, (v, n) in enumerate(zip(rate, t["n_critical"])):
         ax[1].text(i, (0 if np.isnan(v) else v) + 0.03, f"{0 if np.isnan(v) else v:.0%}\nn={n}", ha="center", va="bottom", fontsize=8)
     ax[1].set_ylim(0, 1.2)
-    ax[1].set_title("Odsetek znalezionych najlepszych ruchów (95% CI)")
+    ax[1].set_title("Share of best moves found (95% CI)")
     for a in ax[:2]:
         a.set_xticks(x)
         a.set_xticklabels(CHECK_ORDER)
@@ -264,7 +281,7 @@ def plot_check(df: pd.DataFrame):
     ax[2].set_xticks(np.arange(len(PIECE_ORDER)))
     ax[2].set_xticklabels(PIECE_ORDER)
     ax[2].set_ylim(0, 1.3)
-    ax[2].set_title("Według figury wykonującej najlepszy ruch")
+    ax[2].set_title("By the piece making the best move")
     ax[2].legend(fontsize=8)
     fig.tight_layout()
     return fig
@@ -289,7 +306,7 @@ def plot_check_elo(df: pd.DataFrame, bins: list[int], labels: list[str]):
     ax.set_xticks(np.arange(len(labels)))
     ax.set_xticklabels(labels)
     ax.set_ylim(0, 1.15)
-    ax.set_title("Odsetek znalezionych najlepszych ruchów wg Elo: obrona przed szachem vs reszta")
+    ax.set_title("Share of best moves found by Elo: defence against check vs the rest")
     ax.legend()
     fig.tight_layout()
     return fig
