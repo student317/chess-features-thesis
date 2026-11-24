@@ -1,18 +1,28 @@
-# środowisko wirtualne
+# virtual environment
 venv/
 
-# cache Pythona i Jupytera
+# Python / Jupyter caches
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
 
-# duże pliki z danymi 
+# big data files stay out of the repo
 data/*.zst
 data/*.parquet
 data/*.csv
+data/*.bak*
+data/*.xlsx
 
 # Stockfish
 /stockfish/
 
-# sample.pgn zostaje w repo (jest mały)
+# small sample game stays in the repo
 !data/sample.pgn
+
+# results for the supervisors (Bart) - small enough for GitHub
+!data/analysed_games.csv
+!data/critical_positions.csv
+!data/critical_tacticsnew.csv
+!data/unforced_errors_equal.csv
+!data/review_sample_missed.csv
+!data/tactic_length_5.csv

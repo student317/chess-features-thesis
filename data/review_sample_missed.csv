@@ -1,0 +1,13 @@
+lichess_link,player_elo,missed_tactics,allowed_tactics,fen,best_move,played_move,pv_best
+https://lichess.org/ZTKQqNeo#18,1138,defend_threatened_piece,,2kr1bnr/ppp1pppp/6q1/8/3n1B2/2NP1Q1P/PPP2PP1/R3KB1R w KQ - 3 10,f3d1,f3e4,f3d1 e7e5 f4e3
+https://lichess.org/iuAqL1gY#45,1601,defend_threatened_piece,capture_unprotected,r3n1k1/p1q5/4b1Q1/1pp1P3/3p1B2/8/PPP3PP/R5K1 b - - 0 23,e8g7,g8f8,e8g7 f4g5 c7f7
+https://lichess.org/csV9XB6L#39,1262,discovered_attack,,r4rk1/2p2bp1/p4p1p/Qp2q2P/4pPP1/4P3/PPP1B3/2KR3R b - f3 0 20,e4f3,e5c5,e4f3 e2d3 a8d8
+https://lichess.org/JM2Y9vDr#46,1380,capture_unprotected,pin,r2q3k/2p4p/pb1p2p1/1p2P3/6N1/R1Pn4/1P1P2PP/5Q1K w - - 0 24,f1d3,g4h6,f1d3 d8h4 d3e2
+https://lichess.org/C38M1ErM#60,1033,elimination_of_defence,capture_unprotected,8/p1pkrp2/1p1p4/8/1P6/q5P1/5QPP/4R1K1 w - - 0 31,f2f5,e1e7,f2f5 d7c6 e1e7
+https://lichess.org/kXLGyXnL#28,1178,favourable_exchange,,r3n1k1/ppp3pp/2n5/2qP4/8/2P5/PP4PP/RNB1KB1R w KQ - 1 15,d5c6,b2b4,d5c6 c5c6 b1d2
+https://lichess.org/9KLwR8Gv#39,1177,pin,,2kr3r/ppp2p2/3b3p/4pq1n/8/1B1P1R1p/PP1BQP2/RN5K b - - 4 20,f5g4,f5g6,f5g4 f3g3 g4e2
+https://lichess.org/Phm6GOwd#23,1611,double_attack,capture_unprotected,r1b1k2r/1ppnppb1/p6p/3B2p1/3n2P1/1NP4P/PP1BPP2/R3K1NR b KQkq - 0 12,d4c2,d4b3,d4c2 e1d1 c2a1
+https://lichess.org/x80JZKJg#13,1672,defend_threatened_piece,capture_attacked_more_than_defended;double_attack,r2qkb1r/pQpnpppp/5n2/1N6/3P2b1/8/PPP3PP/R1B1KBNR b KQkq - 2 7,a8c8,d7b6,a8c8 c1f4 e7e5
+https://lichess.org/onKEAu3i#31,1398,defend_threatened_piece,capture_unprotected,1rb2rk1/1p3ppp/p7/2b2p2/2P5/1P4Q1/PB1q1PPP/1R3RK1 b - - 3 16,d2h6,g7g6,d2h6 b2g7 h6g7
+https://lichess.org/mfyZc4PO#21,964,capture_unprotected,,rnbq1rk1/pp3ppp/2p5/4N3/8/1QnP2P1/P3PPBP/R1B2RK1 b - - 1 11,c3e2,c3b5,c3e2 g1h1 e2c1
+https://lichess.org/01eARakW#40,1299,capture_unprotected,double_attack,r5k1/3nrppp/pN1pb3/4p3/3Pn3/5N2/4BPPP/RR4K1 w - - 0 21,b6a8,b6d7,b6a8 e4c3 b1e1

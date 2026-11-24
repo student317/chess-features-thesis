@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import bisect
+import contextlib
 import io
 import math
 import os
@@ -72,6 +73,75 @@ def iter_games(path: str) -> Iterator[chess.pgn.Game]:
             yield from _read_all(f)
 
 
+def parse_time_control(tc) -> tuple:
+    """Lichess TimeControl header -> (base_seconds, increment_seconds).
+    '180+3' -> (180, 3), '600+0' -> (600, 0); '-', '?' or None -> (None, None)."""
+    if not tc or "+" not in str(tc):
+        return (None, None)
+    base, _, inc = str(tc).partition("+")
+    try:
+        return int(base), int(inc)
+    except ValueError:
+        return (None, None)
+
+
+@contextlib.contextmanager
+def _open_text(path: str):
+    """Open a .pgn or .pgn.zst file as a text stream."""
+    if path.endswith(".zst"):
+        import zstandard as zstd
+
+        with open(path, "rb") as fh:
+            with zstd.ZstdDecompressor().stream_reader(fh) as reader:
+                yield io.TextIOWrapper(reader, encoding="utf-8", errors="replace")
+    else:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            yield f
+
+
+def iter_games_indexed(path: str, decide=None, stats: Optional[dict] = None, on_progress=None,
+                       progress_every: int = 5000, max_scanned: Optional[int] = None):
+    """Yield (game_id, game) only for games that `decide(game_id, headers)`
+    accepts (it returns None to accept, or a short reason string to skip).
+    Rejected games are skipped WITHOUT parsing their moves (python-chess
+    SKIP), which is many times faster than parsing everything.
+
+    game_id is the position of the game in the file - the same numbering as
+    before, so existing results stay valid. `stats` collects how many games
+    were scanned and how many were skipped for which reason; `on_progress`
+    is called every `progress_every` scanned games; `max_scanned` stops the
+    scan after that many games of the file."""
+    if stats is None:
+        stats = {}
+    state = {"reason": None, "idx": 0}
+    skip_marker = getattr(chess.pgn, "SKIP", None)
+
+    class _Builder(chess.pgn.GameBuilder):
+        def end_headers(self):
+            state["reason"] = decide(state["idx"], self.game.headers) if decide else None
+            if state["reason"] is not None and skip_marker is not None:
+                return skip_marker
+            return None
+
+    with _open_text(path) as handle:
+        while True:
+            if max_scanned is not None and state["idx"] >= max_scanned:
+                break
+            state["reason"] = None
+            game = chess.pgn.read_game(handle, Visitor=_Builder)
+            if game is None:
+                break
+            idx = state["idx"]
+            state["idx"] += 1
+            stats["scanned"] = state["idx"]
+            if on_progress is not None and state["idx"] % progress_every == 0:
+                on_progress(stats)
+            if state["reason"] is not None:
+                stats[state["reason"]] = stats.get(state["reason"], 0) + 1
+                continue
+            yield idx, game
+
+
 def _int_or_none(x) -> Optional[int]:
     try:
         return int(x)
@@ -91,6 +161,8 @@ def analyse_game(
     """Analyse every position of one game; return one row per analysed position."""
     white_elo = _int_or_none(game.headers.get("WhiteElo"))
     black_elo = _int_or_none(game.headers.get("BlackElo"))
+    tc = game.headers.get("TimeControl")
+    inc = parse_time_control(tc)[1]
 
     board = game.board()
     rows: list[dict] = []
@@ -120,6 +192,8 @@ def analyse_game(
                     "player_elo": white_elo if white_to_move else black_elo,
                     "white_elo": white_elo,
                     "black_elo": black_elo,
+                    "time_control": tc,
+                    "increment": inc,
                     "n_legal_moves": n_legal,
                     "best_move": best_move.uci(),
                     "second_move": second_move.uci(),
@@ -145,16 +219,20 @@ def _game_elo(game: chess.pgn.Game) -> Optional[float]:
     return (we + be) / 2
 
 
-def _load_progress(output_csv: str, quota_edges: Optional[list[int]]):
+def _load_progress(output_csv: str, quota_edges: Optional[list[int]], increment: Optional[int] = None):
     """Read an existing results file: which game_ids are done, and how many
-    games each Elo bin already has (for quota sampling)."""
+    games each Elo bin already has (for quota sampling). With `increment`,
+    only games with that increment count toward the bin quotas (needs the
+    `increment` column - see timecontrol.tag_time_control)."""
     done_ids: set[int] = set()
     bin_counts: dict[int, int] = {}
     if not os.path.exists(output_csv):
         return done_ids, bin_counts
-    old = pd.read_csv(output_csv, usecols=lambda c: c in {"game_id", "white_elo", "black_elo", "player_elo"})
+    old = pd.read_csv(output_csv, usecols=lambda c: c in {"game_id", "white_elo", "black_elo", "player_elo", "increment"})
     done_ids = set(old["game_id"].unique())
-    if quota_edges:
+    if increment is not None and "increment" in old.columns:
+        old = old[old["increment"] == increment]
+    if quota_edges and len(old):
         per_game = old.groupby("game_id")["player_elo"].mean()   # fallback
         if {"white_elo", "black_elo"} <= set(old.columns):
             exact = old.groupby("game_id")[["white_elo", "black_elo"]].first().mean(axis=1, skipna=False)
@@ -182,8 +260,11 @@ def find_critical_positions(
     save_every: int = 10,
     sample_prob: float = 1.0,
     seed: int = 42,
+    increment: Optional[int] = None,
     registry_path: Optional[str] = None,
     registry_skip: str = "all",
+    max_scanned: Optional[int] = None,
+    progress_every: int = 5000,
 ) -> pd.DataFrame:
     """
     Run Stockfish over games from a PGN / PGN.ZST file and APPEND results to
@@ -205,16 +286,32 @@ def find_critical_positions(
       instead of being just its first games. Slower to fill, because the
       file has to be read much further.
 
+    * increment=3 -> only games whose TimeControl header has a 3-second
+      increment (e.g. '300+3'); None = no time-control filter. The quotas
+      then count only games with that increment.
+    * max_scanned -> stop after looking at that many games of the file (so a
+      rare quota cannot make the run scan the whole file for hours).
+    * Games that do not qualify are skipped without parsing their moves; the
+      progress bar shows how many games were scanned and why they were skipped.
+
     The Elo bins you use for ANALYSIS are independent of this: results are
     stored with raw `player_elo`, so re-binning needs no re-analysis.
     """
     limit = chess.engine.Limit(depth=depth)
-    done_ids, bin_counts = _load_progress(output_csv, quota_edges)
+    done_ids, bin_counts = _load_progress(output_csv, quota_edges, increment)
     n_bins = (len(quota_edges) - 1) if quota_edges else 0
     use_quota = bool(quota_edges and games_per_bin)
 
     def quotas_full() -> bool:
         return use_quota and all(bin_counts.get(b, 0) >= games_per_bin for b in range(n_bins))
+
+    if use_quota:
+        what = f"games with increment {increment}" if increment is not None else "games"
+        print(f"quota status at start ({what} per Elo bin, target {games_per_bin}):",
+              {b: bin_counts.get(b, 0) for b in range(n_bins)})
+        if quotas_full():
+            print("all quotas are already full - nothing to analyse")
+            return pd.read_csv(output_csv) if os.path.exists(output_csv) else pd.DataFrame()
 
     os.makedirs(os.path.dirname(os.path.abspath(output_csv)), exist_ok=True)
     buffer: list[dict] = []
@@ -241,25 +338,58 @@ def find_critical_positions(
     engine = chess.engine.SimpleEngine.popen_uci(engine_path)
     try:
         engine.configure({"Threads": threads, "Hash": hash_mb})
-        total = max_games if max_games is not None else None
-        pbar = tqdm(total=total, desc="games analysed", initial=len(done_ids))
+        if use_quota:
+            total = n_bins * games_per_bin
+            initial = sum(min(bin_counts.get(b, 0), games_per_bin) for b in range(n_bins))
+        else:
+            total = max_games
+            initial = len(done_ids)
+        pbar = tqdm(total=total, desc="games analysed", initial=initial)
         done = len(done_ids)
+        analysed_now = 0
         since_flush = 0
-        for game_id, game in enumerate(iter_games(pgn_path)):
+        stats: dict = {}
+
+        def decide(game_id, headers):
+            """Header-only checks; None = analyse this game, else the reason to skip it."""
+            if game_id in done_ids:
+                return "already in results"
+            if reg_keys is not None and make_game_key(headers, pgn_path, game_id) in reg_keys:
+                return "already in registry"
+            if sample_prob < 1.0 and rng.random() > sample_prob:
+                return "not sampled"
+            we, be = _int_or_none(headers.get("WhiteElo")), _int_or_none(headers.get("BlackElo"))
+            g = None if we is None or be is None else (we + be) / 2
+            if min_elo is not None and (g is None or g < min_elo):
+                return "Elo below min_elo"
+            if increment is not None and parse_time_control(headers.get("TimeControl"))[1] != increment:
+                return "other increment"
+            if use_quota:
+                if g is None:
+                    return "no Elo"
+                b = bisect.bisect_left(quota_edges, g) - 1          # bins are (a, b]
+                if not 0 <= b < n_bins:
+                    return "Elo outside the bins"
+                if bin_counts.get(b, 0) >= games_per_bin:
+                    return "Elo bin full"
+            return None
+
+        def on_progress(st):
+            skipped = ", ".join(f"{k}: {v}" for k, v in sorted(st.items(), key=lambda kv: -kv[1]) if k != "scanned")
+            pbar.set_postfix_str(f"scanned {st.get('scanned', 0)} | new {analysed_now} | skipped - {skipped}")
+            pbar.refresh()
+
+        for game_id, game in iter_games_indexed(pgn_path, decide, stats, on_progress, progress_every, max_scanned):
             if max_games is not None and done >= max_games:
                 break
             if quotas_full():
                 break
-            if game_id in done_ids:
-                continue
             key = make_game_key(game.headers, pgn_path, game_id)
-            if reg_keys is not None and key in reg_keys:
-                continue                      # already analysed (registry)
-            if sample_prob < 1.0 and rng.random() > sample_prob:
-                continue
             g_elo = _game_elo(game)
             if min_elo is not None and (g_elo is None or g_elo < min_elo):
                 continue
+            if increment is not None and parse_time_control(game.headers.get("TimeControl"))[1] != increment:
+                continue                      # only games with this increment (seconds per move)
             if use_quota:
                 if g_elo is None:
                     continue
@@ -277,12 +407,19 @@ def find_critical_positions(
                     len(rows), len(rows), sum(bool(r["is_critical"]) for r in rows),
                     True, "find_critical_positions", depth, gap_threshold, min_ply))
             done += 1
+            analysed_now += 1
             since_flush += 1
             pbar.update(1)
+            on_progress(stats)               # keep the status line current after every analysed game
             if since_flush >= save_every:
                 flush()
                 since_flush = 0
+        on_progress(stats)
         pbar.close()
+        print(f"scanned {stats.get('scanned', 0)} games of the file, analysed {analysed_now} new games")
+        print("skipped because:", {k: v for k, v in stats.items() if k != "scanned"})
+        if use_quota:
+            print("games per Elo bin now:", {b: bin_counts.get(b, 0) for b in range(n_bins)})
     finally:
         flush()          # also runs when you press Stop / an error happens
         engine.quit()
@@ -352,6 +489,7 @@ def collect_critical_positions(
     min_elo: Optional[int] = None,
     threads: int = 2,
     hash_mb: int = 128,
+    increment: Optional[int] = None,
     registry_path: Optional[str] = None,
     registry_skip: str = "all",
 ) -> pd.DataFrame:
@@ -423,7 +561,11 @@ def collect_critical_positions(
             be = _int_or_none(game.headers.get("BlackElo"))
             if min_elo is not None and (we is None or be is None or min(we, be) < min_elo):
                 continue
+            if increment is not None and parse_time_control(game.headers.get("TimeControl"))[1] != increment:
+                continue                      # only games with this increment (seconds per move)
             scanned += 1
+            tc = game.headers.get("TimeControl")
+            inc = parse_time_control(tc)[1]
 
             # collect candidate positions of this game
             candidates = []
@@ -466,6 +608,8 @@ def collect_critical_positions(
                     "player_elo": elo,
                     "white_elo": we,
                     "black_elo": be,
+                    "time_control": tc,
+                    "increment": inc,
                     "n_legal_moves": n_legal,
                     "best_move": res["best_move"].uci(),
                     "second_move": res["second_move"].uci(),
@@ -521,6 +665,7 @@ def collect_critical_by_piece(
     min_elo: Optional[int] = None,
     threads: int = 2,
     hash_mb: int = 128,
+    increment: Optional[int] = None,
     registry_path: Optional[str] = None,
     registry_skip: str = "all",
 ) -> pd.DataFrame:
@@ -595,7 +740,11 @@ def collect_critical_by_piece(
             be = _int_or_none(game.headers.get("BlackElo"))
             if min_elo is not None and (we is None or be is None or min(we, be) < min_elo):
                 continue
+            if increment is not None and parse_time_control(game.headers.get("TimeControl"))[1] != increment:
+                continue                      # only games with this increment (seconds per move)
             scanned += 1
+            tc = game.headers.get("TimeControl")
+            inc = parse_time_control(tc)[1]
 
             candidates = []
             eligible_total = 0     # positions that could be analysed in this game
@@ -640,6 +789,8 @@ def collect_critical_by_piece(
                     "player_elo": elo,
                     "white_elo": we,
                     "black_elo": be,
+                    "time_control": tc,
+                    "increment": inc,
                     "n_legal_moves": n_legal,
                     "best_move": res["best_move"].uci(),
                     "second_move": res["second_move"].uci(),
