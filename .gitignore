@@ -26,3 +26,4 @@ data/*.xlsx
 !data/unforced_errors_equal.csv
 !data/review_sample_missed.csv
 !data/tactic_length_5.csv
+!data/classified_positions.csv
